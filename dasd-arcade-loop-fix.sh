@@ -466,22 +466,6 @@ if (( DURABLE )); then
   note "    next starts and restores the broken reset date, allowing the loop to resume."
   note "    Use the default +7-day repair instead; it is known to survive agent restart."
   die $E_ABORT "Refusing to apply a durable value that macOS will not preserve."
-
-  # Kept unreachable for now so the previous strategy is documented in-place.
-  d_epoch="$(to_epoch "$DURABLE_DATE")"
-  if [[ -z "$d_epoch" ]]; then
-    bad "Internal error: could not parse DURABLE_DATE ('${DURABLE_DATE}')."
-    die $E_STATE "Bad durable date constant."
-  fi
-  if [[ -n "$CUR_EPOCH" && $d_epoch -le $CUR_EPOCH ]]; then
-    bad "Durable target (${DURABLE_DATE}) is not after the current value."
-    die $E_STATE "Refusing to move the date backwards."
-  fi
-  NEW_EPOCH=$d_epoch
-  say "  Chosen strategy: ${C_BLD}DURABLE${C_RST}"
-  note "    Sets the date far into the future so the task never comes due again."
-  note "    Trade-off: Apple Arcade payout/engagement telemetry stops advancing."
-  note "    (Developer payout bookkeeping - cosmetic for a normal user.)"
 else
   [[ -n "$CUR_EPOCH" ]] || die $E_STATE "No current value to advance."
   NEW_EPOCH=$((CUR_EPOCH + CYCLE_SECONDS))
@@ -739,16 +723,16 @@ info "CPU before (agent)    : $(fmt_cpu "$ASA_CPU_BEFORE")"
 info "CPU after  (agent)    : $(fmt_cpu "$(proc_cpu appstoreagent)")"
 say ""
 
-if (( VERIFY_OK )); then
-  ok "dasd is now below 1% of a core - the loop has stopped."
-elif [[ -n "$REVERTED" ]]; then
-  bad "dasd is still busy AND the preference was reverted."
+if [[ -n "$REVERTED" ]]; then
+  bad "Preference persistence verification failed."
   note "    The value is cached somewhere other than this preference (likely"
   note "    inside appstored). Next steps, in order:"
   note "      1. sudo launchctl kickstart -k system/${DAEMON_LABEL}"
   note "      2. Re-run this script, then check the value again."
   note "      3. If it still reverts, the App Store local state needs the"
   note "         heavier reset (delete ${PREF_DOMAIN} prefs + caches)."
+elif (( VERIFY_OK )); then
+  ok "dasd is now below 1% of a core - the loop has stopped."
 else
   warn "dasd is still above 1%. Give it another minute and re-measure:"
   note "      top -l 3 -o cpu -n 20 -stats pid,command,cpu | grep dasd"
