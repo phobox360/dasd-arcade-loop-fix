@@ -774,7 +774,10 @@ say "  the weekly boundary, busy-loops ~69,000x at ~150 iterations/sec, and"
 say "  floods the unified log at ~2,000 lines/sec until logd quarantines dasd."
 say ""
 
-if (( VERIFY_OK )); then
+if [[ -n "$REVERTED" ]]; then
+  bad "Done, but preference persistence verification failed. See STEP 7/9 above."
+  exit $E_VERIFY
+elif (( VERIFY_OK )); then
   ok "Done."
   exit 0
 else
