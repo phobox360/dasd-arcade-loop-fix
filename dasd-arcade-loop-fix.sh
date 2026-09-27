@@ -32,14 +32,14 @@
 #
 #    NOTE: this stops the CURRENT episode.  The upstream bug still fails to
 #    advance the date, so it will almost certainly recur at the next weekly
-#    boundary (Sunday 00:00 local).  Use --durable to suppress it outright.
+#    boundary (Sunday 00:00 local).  Re-run the script if it recurs.
 #
 #  STRICTLY REVERSIBLE.  `--rollback` restores the original value.
 #===============================================================================
 
 set -uo pipefail
 
-VERSION="1.0.0"
+VERSION="1.0.1"
 PREF_DOMAIN="com.apple.appstored"
 PREF_KEY="ArcadePayoutResetDate"
 AGENT_LABEL="com.apple.appstoreagent"
@@ -110,9 +110,9 @@ MODES
   --yes, -y        Do not prompt (for scripted use).
 
 OPTIONS
-  --durable        Instead of "next week", set the date to
-                   2035-01-01 00:00:00 +0000
-                   so the task never comes due again. Stops it permanently.
+  --durable        Unsupported on macOS 27. Retained only to give users of
+                   older versions an explicit error instead of silently
+                   applying a strategy that appstoreagent will undo.
   --log FILE       Also write all output to FILE.
   --backup-dir DIR Where to keep the backup + saved original.
                    Default: ./dasd-arcade-fix-backups next to this script.
@@ -313,7 +313,7 @@ CUR_RAW="$(read_pref)"
 CUR_TYPE="$(pref_type)"
 
 say "  ${PREF_DOMAIN} / ${PREF_KEY}:"
-info "raw value (defaults) : ${CUR_RAW:-<empty>}"
+info "raw stored value     : ${CUR_RAW:-<empty>}"
 info "stored plist type    : ${CUR_TYPE}"
 say ""
 
@@ -332,7 +332,7 @@ fi
 CUR_EPOCH="$([[ -n "$CUR_RAW" ]] && to_epoch "$CUR_RAW" || true)"
 if [[ -n "$CUR_RAW" && -z "$CUR_EPOCH" ]]; then
   bad "Could not parse '${CUR_RAW}' as a date."
-  note "    Expected a form like: YYYY-MM-DD HH:MM:SS +0000"
+  note "    Expected YYYY-MM-DD HH:MM:SS +0000 or ISO-8601 UTC."
   die $E_STATE "Unparsable current value; refusing to guess."
 fi
 
@@ -461,6 +461,13 @@ NEW_EPOCH=""
 PROPOSED_RAW=""
 
 if (( DURABLE )); then
+  bad "--durable is not supported on macOS 27."
+  note "    Testing shows appstoreagent rejects the far-future 2035 value when it"
+  note "    next starts and restores the broken reset date, allowing the loop to resume."
+  note "    Use the default +7-day repair instead; it is known to survive agent restart."
+  die $E_ABORT "Refusing to apply a durable value that macOS will not preserve."
+
+  # Kept unreachable for now so the previous strategy is documented in-place.
   d_epoch="$(to_epoch "$DURABLE_DATE")"
   if [[ -z "$d_epoch" ]]; then
     bad "Internal error: could not parse DURABLE_DATE ('${DURABLE_DATE}')."
@@ -674,21 +681,27 @@ else
 fi
 say ""
 
-# Did the daemon revert our value?
+# Check persistence even if appstoreagent is demand-launched and currently
+# absent. A missing process must not turn the persistence check into a skip.
 REVERTED=""
-if [[ -n "$ASA_PID_AFTER" ]]; then
-  sleep 4
-  NOW_RAW="$(read_pref)"
-  NOW_EPOCH="$(to_epoch "$NOW_RAW" 2>/dev/null || true)"
-  info "Preference re-read after restart: ${NOW_RAW}"
-  if [[ -n "$NOW_EPOCH" ]] && [[ "$NOW_EPOCH" -lt "$NEW_EPOCH" ]]; then
-    bad "The value appears to have been moved BACK (expected ${PROPOSED_RAW})."
-    REVERTED=1
-  elif [[ "$NOW_RAW" == "$CUR_RAW" ]]; then
-    bad "The daemon reverted the preference to the original value."
-    REVERTED=1
-  else
-    ok "Value held: the agent did not overwrite it."
+sleep 4
+NOW_RAW="$(read_pref)"
+NOW_EPOCH="$(to_epoch "$NOW_RAW" 2>/dev/null || true)"
+info "Preference re-read after restart attempt: ${NOW_RAW:-<empty>}"
+if [[ -z "$NOW_RAW" || -z "$NOW_EPOCH" ]]; then
+  bad "Could not verify the stored preference after the restart attempt."
+  REVERTED=1
+elif [[ "$NOW_EPOCH" -lt "$NEW_EPOCH" ]]; then
+  bad "The value appears to have been moved BACK (expected ${PROPOSED_RAW})."
+  REVERTED=1
+elif [[ "$NOW_RAW" == "$CUR_RAW" ]]; then
+  bad "The preference reverted to the original value."
+  REVERTED=1
+else
+  ok "Value held on disk after the restart attempt."
+  if [[ -z "$ASA_PID_AFTER" ]]; then
+    warn "appstoreagent is not running, so its next demand-launch is still an"
+    note "    important persistence boundary. Re-run the script if the loop recurs."
   fi
 fi
 say ""
@@ -759,12 +772,12 @@ info "original value: ${BACKUP_DIR}/original-date.txt  (${CUR_RAW})"
 say ""
 
 if (( DURABLE )); then
-  say "  Strategy was DURABLE - this task should not come due again."
+  say "  Strategy was DURABLE (unexpected: this mode should have aborted earlier)."
 else
   say "  Strategy was ADVANCE ONE CYCLE. ${C_YEL}Expect a recurrence at the next"
   say "  weekly boundary: $(human_local "$NEW_EPOCH")${C_RST}"
-  note "    If that happens, re-run this script, or use --durable to stop it"
-  note "    permanently. Please also report the bug to Apple - see below."
+  note "    If that happens, re-run this script. The old --durable strategy is"
+  note "    disabled because macOS 27 does not preserve its far-future value."
 fi
 say ""
 
