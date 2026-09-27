@@ -13,5 +13,3 @@ This script checks for the relevant App Store preference and, after showing a pl
 - To restore the saved date, run `bash dasd-arcade-loop-fix.sh --rollback` with the same backup directory.
 
 The optional `--durable` mode moves the date to 2035, which may suppress this Apple Arcade background task for years. Its effect on Apple Arcade bookkeeping has not been independently established, so avoid that option unless you understand the trade-off.
-
-The script has been syntax-checked but has not been run or validated in this environment, which is not macOS. Its output may include local preference paths, timestamps, process information, and log excerpts. Review and redact that output before sharing it publicly. Please report reproducible occurrences to Apple through Feedback Assistant.
