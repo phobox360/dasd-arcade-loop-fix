@@ -175,6 +175,8 @@ to_epoch() {  # echo epoch seconds, or empty on failure
   local s="$1" e
   e=$(TZ=UTC0 date -j -f "%Y-%m-%d %H:%M:%S %z" "$s" +%s 2>/dev/null) && [[ -n "$e" ]] && { echo "$e"; return 0; }
   e=$(TZ=UTC0 date -j -f "%Y-%m-%d %H:%M:%S +0000" "$s" +%s 2>/dev/null) && [[ -n "$e" ]] && { echo "$e"; return 0; }
+  # ISO-8601 Zulu, as emitted by `plutil -extract ... raw` for a <date>.
+  e=$(TZ=UTC0 date -j -f "%Y-%m-%dT%H:%M:%SZ" "$s" +%s 2>/dev/null) && [[ -n "$e" ]] && { echo "$e"; return 0; }
   return 1
 }
 
@@ -183,7 +185,20 @@ from_epoch() { TZ=UTC0 date -r "$1" "+%Y-%m-%d %H:%M:%S %z" 2>/dev/null; }
 # epoch -> a human-readable date in local time
 human_local() { date -r "$1" "+%A %Y-%m-%d %H:%M %z" 2>/dev/null; }
 
-read_pref() {   # echo current value (raw, as `defaults` prints it)
+# Read the stored date in a locale-independent form.
+#
+# `defaults read` renders an NSDate through the user's AppleLocale, so on a
+# 12-hour locale it prints e.g. "2026-09-26 10:00:00 PM +0000" -- and since
+# macOS 14 the separator before AM/PM is U+202F NARROW NO-BREAK SPACE, not an
+# ASCII space. BSD `date -j -f` cannot parse either, so to_epoch() fails and
+# the script aborts at STEP 2 with "Unparsable current value". Setting LC_ALL
+# does not help: the formatting is done by CFDateFormatter, not libc.
+#
+# `plutil -extract ... raw` always emits ISO-8601 Zulu, independent of locale.
+read_pref() {
+  local plist="$HOME/Library/Preferences/${PREF_DOMAIN}.plist" v
+  v=$(plutil -extract "$PREF_KEY" raw -o - "$plist" 2>/dev/null) \
+    && [[ -n "$v" ]] && { printf '%s\n' "$v"; return 0; }
   defaults read "$PREF_DOMAIN" "$PREF_KEY" 2>/dev/null
 }
 
